@@ -141,7 +141,6 @@ static int setColor(uint8_t a, uint8_t r, uint8_t g, uint8_t b, int split)
     }
     return 0;
   }
-
   ret = sd_bus_call_method(bus,
 			   "com.example.Blinkts",           /* service to contact */
 			   "/com/example/Blinkts",          /* object path */
@@ -218,7 +217,7 @@ static bool desc_read(struct descriptor *desc, DBusMessageIter *iter)
 					DBUS_TYPE_BYTE_AS_STRING, &array);
 	//printf("%s: %s\n", __func__, desc->uuid);
 	if (desc->vlen && desc->value) {
-	  int split = 1;
+	  int split = 0;
 	  // TODO check which descriptor use split if for the audio thing, else with split = 0
 	  setColor(desc->value[0], desc->value[1], desc->value[2], desc->value[3], split);
 	  dbus_message_iter_append_fixed_array(&array, DBUS_TYPE_BYTE,
