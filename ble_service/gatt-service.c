@@ -40,6 +40,8 @@
 
 #include "error.h"
 
+#include <systemd/sd-bus.h>
+
 #define GATT_MGR_IFACE			"org.bluez.GattManager1"
 #define GATT_SERVICE_IFACE		"org.bluez.GattService1"
 #define GATT_CHR_IFACE			"org.bluez.GattCharacteristic1"
@@ -82,6 +84,20 @@ struct descriptor {
 	const char **props;
 };
 
+sd_bus *bus;
+int bus_ok = 0;
+
+int init_sdbus() {
+          int r = sd_bus_open_user(&bus);
+        if (r < 0) {
+                printf("Failed to connect to system bus: %s\n", strerror(-r));
+		bus_ok = 0;
+		return -1;
+        }
+	bus_ok = 1;
+	return 0;
+}
+
 /*
  * Alert Level support Write Without Response only. Supported
  * properties are defined at doc/gatt-api.txt. See "Flags"
@@ -89,6 +105,89 @@ struct descriptor {
  */
 static const char *ias_alert_level_props[] = { "write-without-response", NULL };
 static const char *desc_props[] = { "read", "write", NULL };
+
+static int setColor(uint8_t a, uint8_t r, uint8_t g, uint8_t b, int split)
+{
+  int ret;
+  sd_bus_error error = SD_BUS_ERROR_NULL;
+  sd_bus_message *m = NULL;
+
+  if (!bus_ok) {
+    if(init_sdbus()) {
+      printf("Went bad\n");
+      return -1;
+    }
+  }
+  if (split) {
+    uint32_t color = a;
+
+    color |= ((uint32_t)r << 24);
+    color |= ((uint32_t)g << 16);
+    color |= ((uint16_t)b << 8);
+
+    ret = sd_bus_call_method(bus,
+			     "com.example.Blinkts",           /* service to contact */
+			     "/com/example/Blinkts",          /* object path */
+			     "com.example.Blinkts",   /* interface name */
+			     "Split",                          /* method name */
+			     &error,                               /* object to return error in */
+			     &m,                                   /* return message on success */
+			     "u",                                 /* input signature */
+			     color                       /* first argument */
+			     );
+    if (ret < 0) {
+      fprintf(stderr, "Failed to issue method call: %s\n", error.message);
+      return -1;
+    }
+    return 0;
+  }
+
+  ret = sd_bus_call_method(bus,
+			   "com.example.Blinkts",           /* service to contact */
+			   "/com/example/Blinkts",          /* object path */
+			   "com.example.Blinkts",   /* interface name */
+			   "SetRed",                          /* method name */
+			   &error,                               /* object to return error in */
+			   &m,                                   /* return message on success */
+			   "y",                                 /* input signature */
+			   r                       /* first argument */
+			   );
+  if (ret < 0) {
+    fprintf(stderr, "Failed to issue method call: %s\n", error.message);
+    return -1;
+  }
+
+  ret = sd_bus_call_method(bus,
+			   "com.example.Blinkts",           /* service to contact */
+			   "/com/example/Blinkts",          /* object path */
+			   "com.example.Blinkts",   /* interface name */
+			   "SetGreen",                          /* method name */
+			   &error,                               /* object to return error in */
+			   &m,                                   /* return message on success */
+			   "y",                                 /* input signature */
+			   g                       /* first argument */
+			   );
+  if (ret < 0) {
+    fprintf(stderr, "Failed to issue method call: %s\n", error.message);
+    return -1;
+  }
+
+  ret = sd_bus_call_method(bus,
+			   "com.example.Blinkts",           /* service to contact */
+			   "/com/example/Blinkts",          /* object path */
+			   "com.example.Blinkts",   /* interface name */
+			   "SetBlue",                          /* method name */
+			   &error,                               /* object to return error in */
+			   &m,                                   /* return message on success */
+			   "y",                                 /* input signature */
+			   b                       /* first argument */
+			   );
+  if (ret < 0) {
+    fprintf(stderr, "Failed to issue method call: %s\n", error.message);
+    return -1;
+  }
+  return 0;
+}
 
 static gboolean desc_get_uuid(const GDBusPropertyTable *property,
 					DBusMessageIter *iter, void *user_data)
@@ -117,13 +216,15 @@ static bool desc_read(struct descriptor *desc, DBusMessageIter *iter)
 
 	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
 					DBUS_TYPE_BYTE_AS_STRING, &array);
-
-	if (desc->vlen && desc->value)
-		dbus_message_iter_append_fixed_array(&array, DBUS_TYPE_BYTE,
+	//printf("%s: %s\n", __func__, desc->uuid);
+	if (desc->vlen && desc->value) {
+	  int split = 1;
+	  // TODO check which descriptor use split if for the audio thing, else with split = 0
+	  setColor(desc->value[0], desc->value[1], desc->value[2], desc->value[3], split);
+	  dbus_message_iter_append_fixed_array(&array, DBUS_TYPE_BYTE,
 						&desc->value, desc->vlen);
-
+	}
 	dbus_message_iter_close_container(iter, &array);
-
 	return true;
 }
 
@@ -132,19 +233,21 @@ static gboolean desc_get_value(const GDBusPropertyTable *property,
 {
 	struct descriptor *desc = user_data;
 
-	printf("Descriptor(%s): Get(\"Value\")\n", desc->uuid);
+	//printf("Descriptor(%s): Get(\"Value\")\n", desc->uuid);
 
 	return desc_read(desc, iter);
 }
 
 static void desc_write(struct descriptor *desc, const uint8_t *value, int len)
 {
-	g_free(desc->value);
+        g_free(desc->value);
 	desc->value = g_memdup(value, len);
 	desc->vlen = len;
 
 	g_dbus_emit_property_changed(connection, desc->path,
 					GATT_DESCRIPTOR_IFACE, "Value");
+	for (int i; i < len; i++)
+	  printf("write val: %u", value[i]);
 }
 
 static int parse_value(DBusMessageIter *iter, const uint8_t **value, int *len)
@@ -879,8 +982,8 @@ int main(int argc, char *argv[])
 				dbus_bus_get_unique_name(connection));
 
 	create_services_one();
-	create_services_two();
-	create_services_three();
+	//create_services_two();
+	//create_services_three();
 
 	client = g_dbus_client_new(connection, "org.bluez", "/");
 
