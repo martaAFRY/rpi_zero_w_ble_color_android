@@ -23,4 +23,5 @@ busctl --user call com.example.Blinkts /com/example/Blinkts com.example.Blinkts 
 This should clear all colors:
 busctl --user call com.example.Blinkts /com/example/Blinkts com.example.Blinkts Clear
 
-This is based on the 
+If you don't have any blinkt device the code should be very to modify for some other LED thing.
+
